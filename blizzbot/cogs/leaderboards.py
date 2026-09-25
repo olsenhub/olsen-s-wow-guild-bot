@@ -6,10 +6,11 @@ from blizzbot import db
 from blizzbot.emojis import class_emoji
 
 METRICS = {
-    "level": "Level",
     "achievement_points": "Achievement Points",
     "item_level": "Item Level",
+    "level": "Level",
 }
+DEFAULT_METRIC = "achievement_points"
 
 WOW_CLASSES = [
     "Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Death Knight",
@@ -40,8 +41,11 @@ def build_leaderboard_embed(conn, metric: str, character_class: str | None,
 
 
 class MetricSelect(discord.ui.Select):
-    def __init__(self):
-        options = [discord.SelectOption(label=label, value=key) for key, label in METRICS.items()]
+    def __init__(self, selected: str = DEFAULT_METRIC):
+        options = [
+            discord.SelectOption(label=label, value=key, default=(key == selected))
+            for key, label in METRICS.items()
+        ]
         super().__init__(placeholder="Metric...", options=options, custom_id="lb_metric")
 
     async def callback(self, interaction: discord.Interaction):
@@ -68,9 +72,9 @@ class LeaderboardView(discord.ui.View):
         super().__init__(timeout=180)
         self.conn = conn
         self.bot = bot
-        self.metric = "level"
+        self.metric = DEFAULT_METRIC
         self.character_class: str | None = None
-        self.add_item(MetricSelect())
+        self.add_item(MetricSelect(self.metric))
         self.add_item(ClassSelect())
 
     async def refresh(self, interaction: discord.Interaction):
