@@ -18,29 +18,6 @@ CLASS_FALLBACK_EMOJI = {
     "Druid": "🐾",
 }
 
-SLOT_EMOJI = {
-    "HEAD": "🪖",
-    "NECK": "📿",
-    "SHOULDER": "👔",
-    "BACK": "🧣",
-    "CHEST": "👕",
-    "SHIRT": "👚",
-    "TABARD": "🎽",
-    "WRIST": "⌚",
-    "HANDS": "🧤",
-    "WAIST": "🎗️",
-    "LEGS": "👖",
-    "FEET": "🥾",
-    "FINGER_1": "💍",
-    "FINGER_2": "💍",
-    "TRINKET_1": "🔮",
-    "TRINKET_2": "🔮",
-    "MAIN_HAND": "🗡️",
-    "OFF_HAND": "🛡️",
-    "RANGED": "🏹",
-}
-
-
 def _normalize(name: str) -> str:
     return name.lower().replace(" ", "").replace("'", "").replace("-", "")
 

@@ -6,32 +6,8 @@ from discord.ext import commands
 
 from blizzbot import db
 from blizzbot.api import BattleNetError
-from blizzbot.emojis import SLOT_EMOJI, class_emoji
-from blizzbot.gear_image import GEAR_SLOT_ORDER, build_gear_image
-
-QUALITY_DOT = {
-    "POOR": "🔘",
-    "COMMON": "⚪",
-    "UNCOMMON": "🟢",
-    "RARE": "🔵",
-    "EPIC": "🟣",
-    "LEGENDARY": "🟠",
-}
-
-
-def _format_gear_columns(equipment: dict) -> tuple[str, str]:
-    by_slot = {i["slot"]["type"]: i for i in equipment.get("equipped_items", [])}
-    lines = []
-    for slot in GEAR_SLOT_ORDER:
-        item = by_slot.get(slot)
-        slot_icon = SLOT_EMOJI.get(slot, "▫️")
-        if item:
-            quality_dot = QUALITY_DOT.get(item.get("quality", {}).get("type"), "⚪")
-            lines.append(f"{slot_icon} {quality_dot} {item['name']}")
-        else:
-            lines.append(f"{slot_icon} *(empty)*")
-    mid = (len(lines) + 1) // 2
-    return "\n".join(lines[:mid]) or "​", "\n".join(lines[mid:]) or "​"
+from blizzbot.character_sheet import build_character_sheet
+from blizzbot.emojis import class_emoji
 
 
 async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple[discord.Embed, discord.File | None]:
@@ -55,6 +31,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
 
     name = profile.get("name", character_name)
     level = profile.get("level")
+    race = profile.get("race", {}).get("name", "")
     char_class = profile.get("character_class", {}).get("name", "?")
     spec = (profile.get("active_spec") or {}).get("name")
     item_level = profile.get("average_item_level")
@@ -73,41 +50,30 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
         title=f"{emoji} {name} — Level {level} {char_class}" + (f" ({spec})" if spec else ""),
         color=discord.Color.blurple(),
     )
-    if guild_name:
-        embed.add_field(name="Guild", value=guild_name, inline=True)
-    embed.add_field(name="Item Level", value=str(item_level or "?"), inline=True)
-    embed.add_field(name="Achievement Points", value=str(achievement_points), inline=True)
     if exact_cached is not None and exact_cached["guild_rank"] is not None:
         embed.add_field(name="Guild Rank", value=f"#{exact_cached['guild_rank']}", inline=True)
-    embed.add_field(name="Last Login", value=last_login, inline=False)
+    embed.add_field(name="Last Login", value=last_login, inline=True)
 
-    gear_file = None
+    sheet_file = None
     try:
         equipment = await bot.bnet_client.character_equipment(realm_slug, character_name)
-        left, right = _format_gear_columns(equipment)
-        embed.add_field(name="Gear", value=left, inline=True)
-        embed.add_field(name="​", value=right, inline=True)
-        embed.set_footer(text="⚪ Common  🟢 Uncommon  🔵 Rare  🟣 Epic  🟠 Legendary")
-
-        image_buf = await build_gear_image(bot.bnet_client, equipment)
-        if image_buf:
-            gear_file = discord.File(image_buf, filename="gear.png")
-            embed.set_image(url="attachment://gear.png")
-    except BattleNetError:
-        pass
-
-    try:
         media = await bot.bnet_client.character_media(realm_slug, character_name)
-        render = next(
+        render_url = next(
             (a["value"] for a in media.get("assets", []) if a.get("key") in ("main-raw", "main")),
             None,
         )
-        if render:
-            embed.set_thumbnail(url=render)
+        sheet_buf = await build_character_sheet(
+            bot.bnet_client,
+            name=name, level=level, race=race, char_class=char_class, spec=spec,
+            guild_name=guild_name, item_level=item_level, achievement_points=achievement_points,
+            equipment=equipment, render_url=render_url,
+        )
+        sheet_file = discord.File(sheet_buf, filename="character.png")
+        embed.set_image(url="attachment://character.png")
     except BattleNetError:
         pass
 
-    return embed, gear_file
+    return embed, sheet_file
 
 
 class CharacterLookup(commands.Cog):
@@ -118,8 +84,8 @@ class CharacterLookup(commands.Cog):
     @app_commands.describe(name="Character name")
     async def character(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(ephemeral=True)
-        embed, gear_file = await build_character_embed(self.bot, name)
-        kwargs = {"file": gear_file} if gear_file else {}
+        embed, sheet_file = await build_character_embed(self.bot, name)
+        kwargs = {"file": sheet_file} if sheet_file else {}
         await interaction.followup.send(embed=embed, ephemeral=True, **kwargs)
 
     @character.autocomplete("name")
