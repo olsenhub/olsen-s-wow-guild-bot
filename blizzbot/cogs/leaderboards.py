@@ -28,11 +28,14 @@ def build_leaderboard_embed(conn, metric: str, character_class: str | None,
     if not rows:
         embed.description = "No data yet — the poller hasn't synced anyone matching this filter."
         return embed
-    lines = [
-        f"**{i}.** {class_emoji(bot, row['character_class'])} {row['character_name']} — {row['value']}"
-        for i, row in enumerate(rows, start=1)
-    ]
-    embed.description = "\n".join(lines)
+
+    ranks = [f"#{i}" for i in range(1, len(rows) + 1)]
+    names = [f"{class_emoji(bot, row['character_class'])} {row['character_name']}" for row in rows]
+    values = [str(row["value"]) for row in rows]
+
+    embed.add_field(name="Rank", value="\n".join(ranks), inline=True)
+    embed.add_field(name="Character", value="\n".join(names), inline=True)
+    embed.add_field(name=METRICS[metric], value="\n".join(values), inline=True)
     return embed
 
 

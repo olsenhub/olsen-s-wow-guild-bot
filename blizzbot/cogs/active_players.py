@@ -31,7 +31,12 @@ def build_active_embed(bot: commands.Bot) -> discord.Embed:
 
     guild = bot.guilds[0] if bot.guilds else None
 
-    lines = []
+    embed = discord.Embed(title="🟢 Recently Active", color=discord.Color.green())
+    if not rows:
+        embed.description = "No data yet — the poller hasn't synced anyone."
+        return embed
+
+    names, levels, seen = [], [], []
     for row in rows:
         key = (row["character_name"], row["realm_slug"])
         discord_user_id = links_by_character.get(key)
@@ -39,17 +44,14 @@ def build_active_embed(bot: commands.Bot) -> discord.Embed:
         if discord_user_id and guild:
             member = guild.get_member(discord_user_id)
             if member and member.status in (discord.Status.online, discord.Status.idle, discord.Status.dnd):
-                online_badge = " 🟢 online on Discord"
-        lines.append(
-            f"{class_emoji(bot, row['character_class'])} **{row['character_name']}** "
-            f"(lvl {row['level']}) — last seen {_relative_time(row['last_login_timestamp'])}{online_badge}"
-        )
+                online_badge = " 🟢"
+        names.append(f"{class_emoji(bot, row['character_class'])} **{row['character_name']}**")
+        levels.append(str(row["level"]))
+        seen.append(f"{_relative_time(row['last_login_timestamp'])}{online_badge}")
 
-    embed = discord.Embed(
-        title="🟢 Recently Active",
-        description="\n".join(lines) if lines else "No data yet — the poller hasn't synced anyone.",
-        color=discord.Color.green(),
-    )
+    embed.add_field(name="Character", value="\n".join(names), inline=True)
+    embed.add_field(name="Lvl", value="\n".join(levels), inline=True)
+    embed.add_field(name="Last Seen", value="\n".join(seen), inline=True)
     embed.set_footer(
         text="'last seen' is login time only (Blizzard's API has no live location or logout signal). "
         "🟢 means they've linked their character with /link and are currently online on Discord."
