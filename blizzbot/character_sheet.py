@@ -67,7 +67,7 @@ BODY_X_SHIFT = s(12)
 PORTRAIT_BOX = (s(270), s(480))
 PORTRAIT_D = s(96)   # circular class-icon badge diameter
 PORTRAIT_X_OFFSET = s(24)
-PORTRAIT_Y_OFFSET = s(24)
+PORTRAIT_Y_OFFSET = s(8)
 FACTION_D = s(56)
 FACTION_Y_OFFSET = s(24)
 
