@@ -59,11 +59,12 @@ SLOT_LABEL = {
 }
 
 W, H = s(940), s(700)
-ROW_H = s(56)
+ROW_H = s(58)
 ICON = s(44)
 COL_W = s(310)
 BODY_TOP = s(190) - s(24)
 BODY_X_SHIFT = s(12)
+RENDER_X_NUDGE = s(16)   # shifts just the character model left, independent of the gear columns
 PORTRAIT_BOX = (s(270), s(480))
 PORTRAIT_D = s(96)   # circular class-icon badge diameter
 PORTRAIT_X_OFFSET = s(24)
@@ -87,11 +88,11 @@ def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def F_TITLE(): return _font("DejaVuSerif-Bold.ttf", s(30))
-def F_SUBTITLE(): return _font("DejaVuSans-Bold.ttf", s(16))
-def F_STATS(): return _font("DejaVuSans.ttf", s(14))
-def F_ITEM(): return _font("DejaVuSans-Bold.ttf", s(13))
-def F_SMALL(): return _font("DejaVuSans.ttf", s(11))
+def F_TITLE(): return _font("DejaVuSerif-Bold.ttf", s(32))
+def F_SUBTITLE(): return _font("DejaVuSans-Bold.ttf", s(18))
+def F_STATS(): return _font("DejaVuSans.ttf", s(16))
+def F_ITEM(): return _font("DejaVuSans-Bold.ttf", s(14))
+def F_SMALL(): return _font("DejaVuSans.ttf", s(12))
 
 
 async def _fetch(url: str) -> bytes | None:
@@ -193,15 +194,15 @@ def _draw_row(canvas: Image.Image, draw: ImageDraw.ImageDraw, x: int, y: int,
     if item:
         name_color = QUALITY_COLOR.get(quality, (255, 255, 255))
         draw.text((text_x, y - s(2)), _truncate(draw, item["name"], F_ITEM(), text_w), font=F_ITEM(), fill=name_color)
-        draw.text((text_x, y + s(16)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
+        draw.text((text_x, y + s(18)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
         enchants = item.get("enchantments") or []
         if enchants:
             enchant_text = _strip_enchant_label(enchants[0].get("display_string", ""))
-            draw.text((text_x, y + s(30)), _truncate(draw, enchant_text, F_SMALL(), text_w),
+            draw.text((text_x, y + s(33)), _truncate(draw, enchant_text, F_SMALL(), text_w),
                        font=F_SMALL(), fill=TEXT_ENCHANT)
     else:
         draw.text((text_x, y - s(2)), "(empty)", font=F_ITEM(), fill=TEXT_GREY)
-        draw.text((text_x, y + s(16)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
+        draw.text((text_x, y + s(18)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
 
 
 def _paste_circular(canvas: Image.Image, img_bytes: bytes | None, center_xy, diameter: int, ring_color) -> None:
@@ -310,7 +311,7 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
             portrait = portrait.resize(
                 (int(portrait.width * scale), int(portrait.height * scale)), Image.LANCZOS
             )
-            px = (W - portrait.width) // 2 + BODY_X_SHIFT
+            px = (W - portrait.width) // 2 + BODY_X_SHIFT - RENDER_X_NUDGE
             py = BODY_TOP + (len(LEFT_SLOTS) * ROW_H - portrait.height) // 2
             canvas.paste(portrait, (px, py), portrait)
         except Exception:
