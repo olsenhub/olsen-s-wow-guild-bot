@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from blizzbot import db
+from blizzbot.emojis import class_emoji
 
 
 def _relative_time(timestamp_ms: int | None) -> str:
@@ -40,8 +41,8 @@ def build_active_embed(bot: commands.Bot) -> discord.Embed:
             if member and member.status in (discord.Status.online, discord.Status.idle, discord.Status.dnd):
                 online_badge = " 🟢 online on Discord"
         lines.append(
-            f"**{row['character_name']}** ({row['character_class']}, lvl {row['level']}) — "
-            f"last seen {_relative_time(row['last_login_timestamp'])}{online_badge}"
+            f"{class_emoji(guild, row['character_class'])} **{row['character_name']}** "
+            f"(lvl {row['level']}) — last seen {_relative_time(row['last_login_timestamp'])}{online_badge}"
         )
 
     embed = discord.Embed(

@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from blizzbot import db
+from blizzbot.emojis import class_emoji
 
 METRICS = {
     "level": "Level",
@@ -16,7 +17,8 @@ WOW_CLASSES = [
 ]
 
 
-def build_leaderboard_embed(conn, metric: str, character_class: str | None) -> discord.Embed:
+def build_leaderboard_embed(conn, metric: str, character_class: str | None,
+                             guild: discord.Guild | None = None) -> discord.Embed:
     rows = db.leaderboard(conn, metric, character_class)
     scope = character_class or "Overall"
     embed = discord.Embed(
@@ -27,7 +29,7 @@ def build_leaderboard_embed(conn, metric: str, character_class: str | None) -> d
         embed.description = "No data yet — the poller hasn't synced anyone matching this filter."
         return embed
     lines = [
-        f"**{i}.** {row['character_name']} ({row['character_class']}) — {row['value']}"
+        f"**{i}.** {class_emoji(guild, row['character_class'])} {row['character_name']} — {row['value']}"
         for i, row in enumerate(rows, start=1)
     ]
     embed.description = "\n".join(lines)
@@ -59,16 +61,17 @@ class ClassSelect(discord.ui.Select):
 
 
 class LeaderboardView(discord.ui.View):
-    def __init__(self, conn):
+    def __init__(self, conn, guild: discord.Guild | None = None):
         super().__init__(timeout=180)
         self.conn = conn
+        self.guild = guild
         self.metric = "level"
         self.character_class: str | None = None
         self.add_item(MetricSelect())
         self.add_item(ClassSelect())
 
     async def refresh(self, interaction: discord.Interaction):
-        embed = build_leaderboard_embed(self.conn, self.metric, self.character_class)
+        embed = build_leaderboard_embed(self.conn, self.metric, self.character_class, self.guild)
         await interaction.response.edit_message(embed=embed, view=self)
 
 
@@ -78,8 +81,9 @@ class Leaderboards(commands.Cog):
 
     @app_commands.command(name="leaderboard", description="Show guild leaderboards")
     async def leaderboard(self, interaction: discord.Interaction):
-        view = LeaderboardView(self.bot.db_conn)
-        embed = build_leaderboard_embed(self.bot.db_conn, view.metric, view.character_class)
+        guild = self.bot.guilds[0] if self.bot.guilds else None
+        view = LeaderboardView(self.bot.db_conn, guild)
+        embed = build_leaderboard_embed(self.bot.db_conn, view.metric, view.character_class, guild)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 

@@ -6,11 +6,47 @@ from discord.ext import commands
 
 from blizzbot import db
 from blizzbot.api import BattleNetError
+from blizzbot.emojis import SLOT_EMOJI, class_emoji
+
+GEAR_SLOT_ORDER = [
+    "HEAD", "NECK", "SHOULDER", "BACK", "CHEST", "SHIRT", "TABARD", "WRIST",
+    "HANDS", "WAIST", "LEGS", "FEET", "FINGER_1", "FINGER_2",
+    "TRINKET_1", "TRINKET_2", "MAIN_HAND", "OFF_HAND", "RANGED",
+]
+
+QUALITY_DOT = {
+    "POOR": "🔘",
+    "COMMON": "⚪",
+    "UNCOMMON": "🟢",
+    "RARE": "🔵",
+    "EPIC": "🟣",
+    "LEGENDARY": "🟠",
+}
+
+
+def _format_gear_columns(equipment: dict) -> tuple[str, str]:
+    by_slot = {i["slot"]["type"]: i for i in equipment.get("equipped_items", [])}
+    lines = []
+    for slot in GEAR_SLOT_ORDER:
+        item = by_slot.get(slot)
+        slot_icon = SLOT_EMOJI.get(slot, "▫️")
+        if item:
+            quality_dot = QUALITY_DOT.get(item.get("quality", {}).get("type"), "⚪")
+            lines.append(f"{slot_icon} {quality_dot} {item['name']}")
+        else:
+            lines.append(f"{slot_icon} *(empty)*")
+    mid = (len(lines) + 1) // 2
+    return "\n".join(lines[:mid]) or "​", "\n".join(lines[mid:]) or "​"
 
 
 async def build_character_embed(bot: commands.Bot, character_name: str) -> discord.Embed:
     conn = bot.db_conn
     cached = db.search_member_names(conn, character_name, limit=1)
+    exact_cached = (
+        db.get_member(conn, cached[0]["character_name"], cached[0]["realm_slug"])
+        if cached and cached[0]["character_name"].lower() == character_name.lower()
+        else None
+    )
     realm_slug = cached[0]["realm_slug"] if cached else bot.config.wow_realm_slug
 
     try:
@@ -35,15 +71,29 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> disco
         if last_login_ms else "unknown"
     )
 
+    guild = bot.guilds[0] if bot.guilds else None
+    emoji = class_emoji(guild, char_class)
+
     embed = discord.Embed(
-        title=f"{name} — Level {level} {char_class}" + (f" ({spec})" if spec else ""),
+        title=f"{emoji} {name} — Level {level} {char_class}" + (f" ({spec})" if spec else ""),
         color=discord.Color.blurple(),
     )
     if guild_name:
         embed.add_field(name="Guild", value=guild_name, inline=True)
     embed.add_field(name="Item Level", value=str(item_level or "?"), inline=True)
     embed.add_field(name="Achievement Points", value=str(achievement_points), inline=True)
+    if exact_cached is not None and exact_cached["guild_rank"] is not None:
+        embed.add_field(name="Guild Rank", value=f"#{exact_cached['guild_rank']}", inline=True)
     embed.add_field(name="Last Login", value=last_login, inline=False)
+
+    try:
+        equipment = await bot.bnet_client.character_equipment(realm_slug, character_name)
+        left, right = _format_gear_columns(equipment)
+        embed.add_field(name="Gear", value=left, inline=True)
+        embed.add_field(name="​", value=right, inline=True)
+        embed.set_footer(text="⚪ Common  🟢 Uncommon  🔵 Rare  🟣 Epic  🟠 Legendary")
+    except BattleNetError:
+        pass
 
     try:
         media = await bot.bnet_client.character_media(realm_slug, character_name)
