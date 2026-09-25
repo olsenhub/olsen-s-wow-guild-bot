@@ -79,6 +79,13 @@ class BattleNetClient:
             self._config.namespace_profile,
         )
 
+    async def playable_class_icon_url(self, class_id: int) -> str | None:
+        data = await self._get(f"/data/wow/media/playable-class/{class_id}", self._config.namespace_static)
+        for asset in data.get("assets", []):
+            if asset.get("key") == "icon":
+                return asset.get("value")
+        return None
+
     async def resolve_icon_url(self, media_href: str) -> str | None:
         """Follows an item/spell's media href (already namespaced) to its actual
         icon image URL on Blizzard's render CDN."""

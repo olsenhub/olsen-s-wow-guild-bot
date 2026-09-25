@@ -33,6 +33,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
     level = profile.get("level")
     race = profile.get("race", {}).get("name", "")
     char_class = profile.get("character_class", {}).get("name", "?")
+    char_class_id = profile.get("character_class", {}).get("id")
     spec = (profile.get("active_spec") or {}).get("name")
     item_level = profile.get("average_item_level")
     achievement_points = profile.get("achievement_points", 0)
@@ -61,12 +62,14 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
         media = await bot.bnet_client.character_media(realm_slug, character_name)
         assets = media.get("assets", [])
         render_url = next((a["value"] for a in assets if a.get("key") in ("main-raw", "main")), None)
-        avatar_url = next((a["value"] for a in assets if a.get("key") == "avatar"), None)
+        class_icon_url = (
+            await bot.bnet_client.playable_class_icon_url(char_class_id) if char_class_id else None
+        )
         sheet_buf = await build_character_sheet(
             bot.bnet_client,
             name=name, level=level, race=race, char_class=char_class, spec=spec,
             guild_name=guild_name, item_level=item_level, achievement_points=achievement_points,
-            faction=faction, equipment=equipment, render_url=render_url, avatar_url=avatar_url,
+            faction=faction, equipment=equipment, render_url=render_url, class_icon_url=class_icon_url,
         )
         sheet_file = discord.File(sheet_buf, filename="character.png")
         embed.set_image(url="attachment://character.png")

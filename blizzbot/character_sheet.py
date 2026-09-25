@@ -64,12 +64,11 @@ ICON = s(44)
 COL_W = s(310)
 BODY_TOP = s(190)
 PORTRAIT_BOX = (s(270), s(480))
-PORTRAIT_D = s(96)   # circular avatar diameter
-FACTION_D = s(64)
+PORTRAIT_D = s(96)   # circular class-icon badge diameter
+FACTION_D = s(56)
+FACTION_Y_OFFSET = s(24)
 
-STONE_DARK = (24, 20, 16)
-STONE_LIGHT = (58, 48, 36)
-FRAME_FILL = (46, 38, 28)
+STONE_DARK = (20, 20, 20)
 BEVEL_LIGHT = (25, 25, 25)
 BEVEL_DARK = (0, 0, 0)
 ACCENT = (180, 180, 180)
@@ -153,19 +152,19 @@ def _circle_mask(diameter: int) -> Image.Image:
 
 
 def _draw_frame(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    bg = _stone_texture(W, H, (14, 11, 8), (30, 24, 18))
+    bg = _stone_texture(W, H, (10, 10, 10), (26, 26, 26))
     canvas.paste(bg, (0, 0))
     margin = s(8)
     _bevel_box(draw, margin, margin, W - margin, H - margin, depth=s(4) or 3, raised=True, fill=None)
     inner = s(16)
-    panel_tex = _stone_texture(W - inner * 2, H - inner * 2, (20, 16, 12), (42, 34, 25))
+    panel_tex = _stone_texture(W - inner * 2, H - inner * 2, (16, 16, 16), (36, 36, 36))
     canvas.paste(panel_tex, (inner, inner))
     _bevel_box(draw, inner, inner, W - inner, H - inner, depth=s(2) or 2, raised=False)
 
 
 def _header_bar(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
     x0, y0, x1, y1 = s(24), s(24), W - s(24), s(150)
-    bar = _stone_texture(x1 - x0, y1 - y0, (18, 14, 10), (50, 40, 28))
+    bar = _stone_texture(x1 - x0, y1 - y0, (14, 14, 14), (42, 42, 42))
     canvas.paste(bar, (x0, y0))
     _bevel_box(draw, x0, y0, x1, y1, depth=s(3) or 2, raised=False)
 
@@ -241,13 +240,13 @@ def _draw_faction_badge(canvas: Image.Image, center_xy, faction_type: str | None
 async def build_character_sheet(bnet_client, *, name: str, level: int, race: str, char_class: str,
                                  spec: str | None, guild_name: str | None, item_level, achievement_points,
                                  faction: str | None, equipment: dict,
-                                 render_url: str | None, avatar_url: str | None) -> io.BytesIO:
+                                 render_url: str | None, class_icon_url: str | None) -> io.BytesIO:
     by_slot = {i["slot"]["type"]: i for i in equipment.get("equipped_items", [])}
     all_slots = LEFT_SLOTS + RIGHT_SLOTS
-    icon_bytes_list, render_bytes, avatar_bytes = await asyncio.gather(
+    icon_bytes_list, render_bytes, class_icon_bytes = await asyncio.gather(
         asyncio.gather(*(_fetch_item_icon(bnet_client, by_slot.get(slot)) for slot in all_slots)),
         _fetch(render_url) if render_url else _noop(),
-        _fetch(avatar_url) if avatar_url else _noop(),
+        _fetch(class_icon_url) if class_icon_url else _noop(),
     )
     icons_by_slot = dict(zip(all_slots, icon_bytes_list))
 
@@ -273,9 +272,13 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     stw = draw.textlength(stats, font=stf)
     draw.text(((W - stw) / 2, s(102)), stats, font=stf, fill=TEXT_GREY)
 
-    _paste_circular(canvas, avatar_bytes, (s(24) + PORTRAIT_D // 2 + s(10), s(24) + PORTRAIT_D // 2 + s(10)),
+    _paste_circular(canvas, class_icon_bytes, (s(24) + PORTRAIT_D // 2 + s(10), s(24) + PORTRAIT_D // 2 + s(10)),
                      PORTRAIT_D, class_color)
-    _draw_faction_badge(canvas, (W - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10)), faction)
+    _draw_faction_badge(
+        canvas,
+        (W - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10) + FACTION_Y_OFFSET),
+        faction,
+    )
 
     for i, slot in enumerate(LEFT_SLOTS):
         y = BODY_TOP + i * ROW_H
