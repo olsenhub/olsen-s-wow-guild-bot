@@ -31,9 +31,8 @@ class PanelView(discord.ui.View):
 
     @discord.ui.button(label="Leaderboards", style=discord.ButtonStyle.primary, custom_id="panel_leaderboards", emoji="🏆")
     async def leaderboards(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = self.bot.guilds[0] if self.bot.guilds else None
-        view = LeaderboardView(self.bot.db_conn, guild)
-        embed = build_leaderboard_embed(self.bot.db_conn, view.metric, view.character_class, guild)
+        view = LeaderboardView(self.bot.db_conn, self.bot)
+        embed = build_leaderboard_embed(self.bot.db_conn, view.metric, view.character_class, self.bot)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="Active Players", style=discord.ButtonStyle.success, custom_id="panel_active", emoji="🟢")

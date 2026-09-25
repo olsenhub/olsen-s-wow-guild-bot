@@ -45,8 +45,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
         if last_login_ms else "unknown"
     )
 
-    guild = bot.guilds[0] if bot.guilds else None
-    emoji = class_emoji(guild, char_class)
+    emoji = class_emoji(bot, char_class)
 
     embed = discord.Embed(
         title=f"{emoji} {name} — Level {level} {char_class}" + (f" ({spec})" if spec else ""),

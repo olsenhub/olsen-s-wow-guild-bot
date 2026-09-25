@@ -41,7 +41,7 @@ def build_active_embed(bot: commands.Bot) -> discord.Embed:
             if member and member.status in (discord.Status.online, discord.Status.idle, discord.Status.dnd):
                 online_badge = " 🟢 online on Discord"
         lines.append(
-            f"{class_emoji(guild, row['character_class'])} **{row['character_name']}** "
+            f"{class_emoji(bot, row['character_class'])} **{row['character_name']}** "
             f"(lvl {row['level']}) — last seen {_relative_time(row['last_login_timestamp'])}{online_badge}"
         )
 

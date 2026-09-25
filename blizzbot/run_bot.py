@@ -37,6 +37,13 @@ class BlizzBot(commands.Bot):
         from blizzbot.cogs.panel import PanelView
         self.add_view(PanelView(self))
 
+        try:
+            self.application_emojis = await self.fetch_application_emojis()
+            log.info("Loaded %d application emoji(s)", len(self.application_emojis))
+        except discord.HTTPException:
+            self.application_emojis = []
+            log.exception("Could not fetch application emojis")
+
         if self.config.discord_guild_id:
             guild_obj = discord.Object(id=self.config.discord_guild_id)
             self.tree.copy_global_to(guild=guild_obj)
