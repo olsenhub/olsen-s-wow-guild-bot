@@ -62,9 +62,12 @@ W, H = s(940), s(700)
 ROW_H = s(56)
 ICON = s(44)
 COL_W = s(310)
-BODY_TOP = s(190)
+BODY_TOP = s(190) - s(24)
+BODY_X_SHIFT = s(12)
 PORTRAIT_BOX = (s(270), s(480))
 PORTRAIT_D = s(96)   # circular class-icon badge diameter
+PORTRAIT_X_OFFSET = s(24)
+PORTRAIT_Y_OFFSET = s(24)
 FACTION_D = s(56)
 FACTION_Y_OFFSET = s(24)
 
@@ -272,8 +275,11 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     stw = draw.textlength(stats, font=stf)
     draw.text(((W - stw) / 2, s(102)), stats, font=stf, fill=TEXT_GREY)
 
-    _paste_circular(canvas, class_icon_bytes, (s(24) + PORTRAIT_D // 2 + s(10), s(24) + PORTRAIT_D // 2 + s(10)),
-                     PORTRAIT_D, class_color)
+    _paste_circular(
+        canvas, class_icon_bytes,
+        (s(24) + PORTRAIT_D // 2 + s(10) + PORTRAIT_X_OFFSET, s(24) + PORTRAIT_D // 2 + s(10) + PORTRAIT_Y_OFFSET),
+        PORTRAIT_D, class_color,
+    )
     _draw_faction_badge(
         canvas,
         (W - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10) + FACTION_Y_OFFSET),
@@ -282,11 +288,11 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
 
     for i, slot in enumerate(LEFT_SLOTS):
         y = BODY_TOP + i * ROW_H
-        _draw_row(canvas, draw, s(30), y, slot, by_slot.get(slot), icons_by_slot.get(slot))
+        _draw_row(canvas, draw, s(30) + BODY_X_SHIFT, y, slot, by_slot.get(slot), icons_by_slot.get(slot))
 
     for i, slot in enumerate(RIGHT_SLOTS):
         y = BODY_TOP + i * ROW_H
-        _draw_row(canvas, draw, W - COL_W - s(30), y, slot, by_slot.get(slot), icons_by_slot.get(slot))
+        _draw_row(canvas, draw, W - COL_W - s(30) + BODY_X_SHIFT, y, slot, by_slot.get(slot), icons_by_slot.get(slot))
 
     if render_bytes:
         try:
@@ -304,7 +310,7 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
             portrait = portrait.resize(
                 (int(portrait.width * scale), int(portrait.height * scale)), Image.LANCZOS
             )
-            px = (W - portrait.width) // 2
+            px = (W - portrait.width) // 2 + BODY_X_SHIFT
             py = BODY_TOP + (len(LEFT_SLOTS) * ROW_H - portrait.height) // 2
             canvas.paste(portrait, (px, py), portrait)
         except Exception:
