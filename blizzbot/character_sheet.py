@@ -6,11 +6,13 @@ programmatically (no Blizzard UI art is used)."""
 
 import asyncio
 import io
+from pathlib import Path
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 SCALE = 1.7
 
@@ -43,8 +45,7 @@ CLASS_COLOR = {
     "Druid": (255, 125, 10),
 }
 
-FACTION_COLOR = {"ALLIANCE": (40, 75, 165), "HORDE": (150, 25, 25)}
-FACTION_LETTER = {"ALLIANCE": "A", "HORDE": "H"}
+FACTION_ASSET = {"ALLIANCE": "alliance.png", "HORDE": "horde.png"}
 
 LEFT_SLOTS = ["HEAD", "NECK", "SHOULDER", "BACK", "CHEST", "SHIRT", "TABARD", "WRIST", "HANDS"]
 RIGHT_SLOTS = ["WAIST", "LEGS", "FEET", "FINGER_1", "FINGER_2", "TRINKET_1", "TRINKET_2", "MAIN_HAND", "OFF_HAND"]
@@ -69,9 +70,9 @@ FACTION_D = s(64)
 STONE_DARK = (24, 20, 16)
 STONE_LIGHT = (58, 48, 36)
 FRAME_FILL = (46, 38, 28)
-BEVEL_LIGHT = (150, 128, 88)
-BEVEL_DARK = (10, 8, 6)
-GOLD = (210, 178, 110)
+BEVEL_LIGHT = (25, 25, 25)
+BEVEL_DARK = (0, 0, 0)
+ACCENT = (180, 180, 180)
 TEXT_GREY = (176, 168, 156)
 TEXT_ENCHANT = (60, 210, 80)
 SHADOW = (0, 0, 0)
@@ -89,7 +90,6 @@ def F_SUBTITLE(): return _font("DejaVuSans-Bold.ttf", s(16))
 def F_STATS(): return _font("DejaVuSans.ttf", s(14))
 def F_ITEM(): return _font("DejaVuSans-Bold.ttf", s(13))
 def F_SMALL(): return _font("DejaVuSans.ttf", s(11))
-def F_BADGE(): return _font("DejaVuSans-Bold.ttf", s(26))
 
 
 async def _fetch(url: str) -> bytes | None:
@@ -224,17 +224,18 @@ def _paste_circular(canvas: Image.Image, img_bytes: bytes | None, center_xy, dia
 
 
 def _draw_faction_badge(canvas: Image.Image, center_xy, faction_type: str | None) -> None:
-    if not faction_type:
+    asset_name = FACTION_ASSET.get(faction_type or "")
+    if not asset_name:
         return
-    color = FACTION_COLOR.get(faction_type, (90, 90, 90))
-    letter = FACTION_LETTER.get(faction_type, "?")
+    try:
+        crest = Image.open(ASSETS_DIR / asset_name).convert("RGBA")
+    except OSError:
+        return
+    target_h = FACTION_D * 2
+    scale = target_h / crest.height
+    crest = crest.resize((int(crest.width * scale), target_h), Image.LANCZOS)
     cx, cy = center_xy
-    r = FACTION_D // 2
-    draw = ImageDraw.Draw(canvas)
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color, outline=GOLD, width=max(2, s(2)))
-    font = F_BADGE()
-    tw = draw.textlength(letter, font=font)
-    draw.text((cx - tw / 2, cy - r * 0.7), letter, font=font, fill=(255, 255, 255))
+    canvas.paste(crest, (cx - crest.width // 2, cy - crest.height // 2), crest)
 
 
 async def build_character_sheet(bnet_client, *, name: str, level: int, race: str, char_class: str,
@@ -263,7 +264,7 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     subtitle = f"Level {level} {race} {char_class}" + (f" — {spec}" if spec else "")
     sf = F_SUBTITLE()
     sw = draw.textlength(subtitle, font=sf)
-    _shadow_text(draw, ((W - sw) / 2, s(72)), subtitle, sf, GOLD)
+    _shadow_text(draw, ((W - sw) / 2, s(72)), subtitle, sf, ACCENT)
 
     stats = f"Item Level {item_level or '?'}   •   {achievement_points:,} Achievement Points"
     if guild_name:
