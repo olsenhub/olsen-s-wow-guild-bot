@@ -54,6 +54,8 @@ class BlizzBot(commands.Bot):
 
 def main() -> None:
     config = load_config()
+    if not config.discord_bot_token:
+        raise RuntimeError("DISCORD_BOT_TOKEN is not set in .env")
     bot = BlizzBot(config)
 
     @bot.event

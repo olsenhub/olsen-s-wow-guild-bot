@@ -48,7 +48,7 @@ def load_config() -> Config:
     guild_id = os.environ.get("DISCORD_GUILD_ID")
     officer_role_id = os.environ.get("OFFICER_ROLE_ID")
     return Config(
-        discord_bot_token=_required("DISCORD_BOT_TOKEN"),
+        discord_bot_token=os.environ.get("DISCORD_BOT_TOKEN", ""),
         discord_webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", ""),
         discord_guild_id=int(guild_id) if guild_id else None,
         officer_role_id=int(officer_role_id) if officer_role_id else None,

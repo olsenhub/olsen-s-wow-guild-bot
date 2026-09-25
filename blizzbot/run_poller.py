@@ -38,8 +38,14 @@ async def sync_once(client: BattleNetClient, conn, config) -> None:
         try:
             profile = await client.character_profile(realm_slug, name)
         except BattleNetError:
-            log.warning("Could not fetch profile for %s-%s (privacy flag or not found)", name, realm_slug)
-            continue
+            # Blizzard's profile cache occasionally 404s transiently even for real,
+            # active characters -- one retry clears most of these.
+            await asyncio.sleep(1)
+            try:
+                profile = await client.character_profile(realm_slug, name)
+            except BattleNetError:
+                log.warning("Could not fetch profile for %s (realm %s) -- privacy flag or not found", name, realm_slug)
+                continue
 
         level = profile.get("level", character.get("level"))
         item_level = profile.get("average_item_level")
