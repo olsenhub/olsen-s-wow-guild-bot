@@ -1,14 +1,24 @@
-"""Renders a classic WoW-style character sheet: gear columns flanking a centered
-character render, in a dark ornate frame -- like the in-game paperdoll, but with
-item names/enchants annotated like a modern armory site."""
+"""Renders a WoW-classic-styled character sheet: gear columns flanking a centered
+character render, inside a carved stone/metal frame with beveled item slots and a
+circular portrait -- like the in-game paperdoll UI, but with item names/enchants
+annotated like a modern armory site. All textures/bevels are generated
+programmatically (no Blizzard UI art is used)."""
 
 import asyncio
 import io
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+
+SCALE = 1.7
+
+
+def s(px: int) -> int:
+    return int(px * SCALE)
+
+
 QUALITY_COLOR = {
     "POOR": (157, 157, 157),
     "COMMON": (255, 255, 255),
@@ -17,7 +27,7 @@ QUALITY_COLOR = {
     "EPIC": (189, 100, 255),
     "LEGENDARY": (255, 145, 20),
 }
-EMPTY_SLOT_COLOR = (55, 50, 45)
+EMPTY_SLOT_COLOR = (70, 64, 56)
 
 CLASS_COLOR = {
     "Warrior": (199, 156, 110),
@@ -33,6 +43,9 @@ CLASS_COLOR = {
     "Druid": (255, 125, 10),
 }
 
+FACTION_COLOR = {"ALLIANCE": (40, 75, 165), "HORDE": (150, 25, 25)}
+FACTION_LETTER = {"ALLIANCE": "A", "HORDE": "H"}
+
 LEFT_SLOTS = ["HEAD", "NECK", "SHOULDER", "BACK", "CHEST", "SHIRT", "TABARD", "WRIST", "HANDS"]
 RIGHT_SLOTS = ["WAIST", "LEGS", "FEET", "FINGER_1", "FINGER_2", "TRINKET_1", "TRINKET_2", "MAIN_HAND", "OFF_HAND"]
 
@@ -44,18 +57,24 @@ SLOT_LABEL = {
     "TRINKET_2": "Trinket", "MAIN_HAND": "Main Hand", "OFF_HAND": "Off Hand",
 }
 
-W, H = 900, 680
-ROW_H = 54
-ICON = 42
-COL_W = 300
-BODY_TOP = 150
+W, H = s(940), s(700)
+ROW_H = s(56)
+ICON = s(44)
+COL_W = s(310)
+BODY_TOP = s(190)
+PORTRAIT_BOX = (s(270), s(480))
+PORTRAIT_D = s(96)   # circular avatar diameter
+FACTION_D = s(64)
 
-BG_OUTER = (8, 7, 6)
-BG_PANEL = (24, 19, 15)
-BORDER_GOLD = (198, 170, 110)
-BORDER_DARK = (55, 42, 24)
-TEXT_GREY = (168, 162, 152)
-TEXT_ENCHANT = (40, 200, 60)
+STONE_DARK = (24, 20, 16)
+STONE_LIGHT = (58, 48, 36)
+FRAME_FILL = (46, 38, 28)
+BEVEL_LIGHT = (150, 128, 88)
+BEVEL_DARK = (10, 8, 6)
+GOLD = (210, 178, 110)
+TEXT_GREY = (176, 168, 156)
+TEXT_ENCHANT = (60, 210, 80)
+SHADOW = (0, 0, 0)
 
 
 def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
@@ -65,11 +84,12 @@ def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-F_TITLE = lambda: _font("DejaVuSerif-Bold.ttf", 30)
-F_SUBTITLE = lambda: _font("DejaVuSans.ttf", 16)
-F_STATS = lambda: _font("DejaVuSans.ttf", 14)
-F_ITEM = lambda: _font("DejaVuSans-Bold.ttf", 13)
-F_SMALL = lambda: _font("DejaVuSans.ttf", 11)
+def F_TITLE(): return _font("DejaVuSerif-Bold.ttf", s(30))
+def F_SUBTITLE(): return _font("DejaVuSans-Bold.ttf", s(16))
+def F_STATS(): return _font("DejaVuSans.ttf", s(14))
+def F_ITEM(): return _font("DejaVuSans-Bold.ttf", s(13))
+def F_SMALL(): return _font("DejaVuSans.ttf", s(11))
+def F_BADGE(): return _font("DejaVuSans-Bold.ttf", s(26))
 
 
 async def _fetch(url: str) -> bytes | None:
@@ -88,6 +108,13 @@ async def _fetch_item_icon(bnet_client, item: dict | None) -> bytes | None:
     return await _fetch(icon_url) if icon_url else None
 
 
+def _strip_enchant_label(text: str) -> str:
+    for prefix in ("enchanted:", "enchant:"):
+        if text.lower().startswith(prefix):
+            return text[len(prefix):].strip()
+    return text
+
+
 def _truncate(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
     if draw.textlength(text, font=font) <= max_width:
         return text
@@ -96,84 +123,166 @@ def _truncate(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont
     return text + "…"
 
 
-def _draw_frame(draw: ImageDraw.ImageDraw) -> None:
-    draw.rectangle([0, 0, W - 1, H - 1], fill=BG_OUTER)
-    draw.rectangle([6, 6, W - 7, H - 7], fill=BG_PANEL, outline=BORDER_GOLD, width=3)
-    draw.rectangle([12, 12, W - 13, H - 13], outline=BORDER_DARK, width=1)
+def _shadow_text(draw, xy, text, font, fill):
+    x, y = xy
+    off = max(1, s(1))
+    draw.text((x + off, y + off), text, font=font, fill=SHADOW)
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def _stone_texture(w: int, h: int, dark, light) -> Image.Image:
+    noise = Image.effect_noise((w, h), 30)
+    tex = ImageOps.colorize(noise, black=dark, white=light).convert("RGB")
+    return tex.filter(ImageFilter.GaussianBlur(s(1) or 1))
+
+
+def _bevel_box(draw, x0, y0, x1, y1, depth, raised=True, fill=None):
+    """Draws a carved (raised or sunken) beveled rectangle."""
+    if fill:
+        draw.rectangle([x0, y0, x1, y1], fill=fill)
+    light, dark = (BEVEL_LIGHT, BEVEL_DARK) if raised else (BEVEL_DARK, BEVEL_LIGHT)
+    for i in range(depth):
+        draw.line([(x0 + i, y1 - i), (x0 + i, y0 + i), (x1 - i, y0 + i)], fill=light)
+        draw.line([(x0 + i, y1 - i), (x1 - i, y1 - i), (x1 - i, y0 + i)], fill=dark)
+
+
+def _circle_mask(diameter: int) -> Image.Image:
+    mask = Image.new("L", (diameter, diameter), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, diameter - 1, diameter - 1], fill=255)
+    return mask
+
+
+def _draw_frame(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    bg = _stone_texture(W, H, (14, 11, 8), (30, 24, 18))
+    canvas.paste(bg, (0, 0))
+    margin = s(8)
+    _bevel_box(draw, margin, margin, W - margin, H - margin, depth=s(4) or 3, raised=True, fill=None)
+    inner = s(16)
+    panel_tex = _stone_texture(W - inner * 2, H - inner * 2, (20, 16, 12), (42, 34, 25))
+    canvas.paste(panel_tex, (inner, inner))
+    _bevel_box(draw, inner, inner, W - inner, H - inner, depth=s(2) or 2, raised=False)
+
+
+def _header_bar(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    x0, y0, x1, y1 = s(24), s(24), W - s(24), s(150)
+    bar = _stone_texture(x1 - x0, y1 - y0, (18, 14, 10), (50, 40, 28))
+    canvas.paste(bar, (x0, y0))
+    _bevel_box(draw, x0, y0, x1, y1, depth=s(3) or 2, raised=False)
 
 
 def _draw_row(canvas: Image.Image, draw: ImageDraw.ImageDraw, x: int, y: int,
               slot: str, item: dict | None, icon_bytes: bytes | None) -> None:
     quality = (item or {}).get("quality", {}).get("type")
-    border = QUALITY_COLOR.get(quality, EMPTY_SLOT_COLOR)
-    draw.rectangle([x - 2, y - 2, x + ICON + 2, y + ICON + 2], fill=border)
+    rim = QUALITY_COLOR.get(quality, EMPTY_SLOT_COLOR)
+
+    draw.rectangle([x - s(3), y - s(3), x + ICON + s(3), y + ICON + s(3)], fill=rim)
+    _bevel_box(draw, x - 1, y - 1, x + ICON + 1, y + ICON + 1, depth=s(2) or 2, raised=False, fill=(12, 10, 8))
     if icon_bytes:
         try:
-            icon = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((ICON, ICON))
-            canvas.paste(icon, (x, y))
+            icon = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((ICON, ICON), Image.LANCZOS)
+            canvas.paste(icon, (x, y), icon)
         except Exception:
             draw.rectangle([x, y, x + ICON, y + ICON], fill=EMPTY_SLOT_COLOR)
     else:
         draw.rectangle([x, y, x + ICON, y + ICON], fill=EMPTY_SLOT_COLOR)
 
-    text_x = x + ICON + 10
-    text_w = COL_W - ICON - 20
+    text_x = x + ICON + s(12)
+    text_w = COL_W - ICON - s(24)
     if item:
         name_color = QUALITY_COLOR.get(quality, (255, 255, 255))
-        draw.text((text_x, y - 2), _truncate(draw, item["name"], F_ITEM(), text_w), font=F_ITEM(), fill=name_color)
-        draw.text((text_x, y + 16), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
+        draw.text((text_x, y - s(2)), _truncate(draw, item["name"], F_ITEM(), text_w), font=F_ITEM(), fill=name_color)
+        draw.text((text_x, y + s(16)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
         enchants = item.get("enchantments") or []
         if enchants:
-            enchant_text = enchants[0].get("display_string", "")
-            draw.text((text_x, y + 30), _truncate(draw, enchant_text, F_SMALL(), text_w),
+            enchant_text = _strip_enchant_label(enchants[0].get("display_string", ""))
+            draw.text((text_x, y + s(30)), _truncate(draw, enchant_text, F_SMALL(), text_w),
                        font=F_SMALL(), fill=TEXT_ENCHANT)
     else:
-        draw.text((text_x, y - 2), "(empty)", font=F_ITEM(), fill=TEXT_GREY)
-        draw.text((text_x, y + 16), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
+        draw.text((text_x, y - s(2)), "(empty)", font=F_ITEM(), fill=TEXT_GREY)
+        draw.text((text_x, y + s(16)), SLOT_LABEL.get(slot, slot), font=F_SMALL(), fill=TEXT_GREY)
+
+
+def _paste_circular(canvas: Image.Image, img_bytes: bytes | None, center_xy, diameter: int, ring_color) -> None:
+    cx, cy = center_xy
+    x0, y0 = cx - diameter // 2, cy - diameter // 2
+    if img_bytes:
+        try:
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+            side = min(img.width, img.height)
+            left, top = (img.width - side) // 2, (img.height - side) // 2
+            img = img.crop((left, top, left + side, top + side)).resize((diameter, diameter), Image.LANCZOS)
+            mask = _circle_mask(diameter)
+            canvas.paste(img, (x0, y0), mask)
+        except Exception:
+            pass
+    draw = ImageDraw.Draw(canvas)
+    ring_w = max(2, s(3))
+    draw.ellipse([x0 - ring_w, y0 - ring_w, x0 + diameter + ring_w, y0 + diameter + ring_w],
+                 outline=ring_color, width=ring_w)
+    draw.ellipse([x0 - ring_w - 1, y0 - ring_w - 1, x0 + diameter + ring_w + 1, y0 + diameter + ring_w + 1],
+                 outline=BEVEL_DARK, width=1)
+
+
+def _draw_faction_badge(canvas: Image.Image, center_xy, faction_type: str | None) -> None:
+    if not faction_type:
+        return
+    color = FACTION_COLOR.get(faction_type, (90, 90, 90))
+    letter = FACTION_LETTER.get(faction_type, "?")
+    cx, cy = center_xy
+    r = FACTION_D // 2
+    draw = ImageDraw.Draw(canvas)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color, outline=GOLD, width=max(2, s(2)))
+    font = F_BADGE()
+    tw = draw.textlength(letter, font=font)
+    draw.text((cx - tw / 2, cy - r * 0.7), letter, font=font, fill=(255, 255, 255))
 
 
 async def build_character_sheet(bnet_client, *, name: str, level: int, race: str, char_class: str,
                                  spec: str | None, guild_name: str | None, item_level, achievement_points,
-                                 equipment: dict, render_url: str | None) -> io.BytesIO:
+                                 faction: str | None, equipment: dict,
+                                 render_url: str | None, avatar_url: str | None) -> io.BytesIO:
     by_slot = {i["slot"]["type"]: i for i in equipment.get("equipped_items", [])}
     all_slots = LEFT_SLOTS + RIGHT_SLOTS
-    icon_bytes_list = await asyncio.gather(
-        *(_fetch_item_icon(bnet_client, by_slot.get(slot)) for slot in all_slots)
+    icon_bytes_list, render_bytes, avatar_bytes = await asyncio.gather(
+        asyncio.gather(*(_fetch_item_icon(bnet_client, by_slot.get(slot)) for slot in all_slots)),
+        _fetch(render_url) if render_url else _noop(),
+        _fetch(avatar_url) if avatar_url else _noop(),
     )
     icons_by_slot = dict(zip(all_slots, icon_bytes_list))
-    render_bytes = await _fetch(render_url) if render_url else None
 
-    canvas = Image.new("RGB", (W, H), BG_OUTER)
+    canvas = Image.new("RGB", (W, H), STONE_DARK)
     draw = ImageDraw.Draw(canvas)
-    _draw_frame(draw)
+    _draw_frame(canvas, draw)
+    _header_bar(canvas, draw)
 
     class_color = CLASS_COLOR.get(char_class, (235, 230, 220))
-    title = name
     tf = F_TITLE()
-    tw = draw.textlength(title, font=tf)
-    draw.text(((W - tw) / 2, 20), title, font=tf, fill=class_color)
+    tw = draw.textlength(name, font=tf)
+    _shadow_text(draw, ((W - tw) / 2, s(32)), name, tf, class_color)
 
     subtitle = f"Level {level} {race} {char_class}" + (f" — {spec}" if spec else "")
     sf = F_SUBTITLE()
     sw = draw.textlength(subtitle, font=sf)
-    draw.text(((W - sw) / 2, 60), subtitle, font=sf, fill=TEXT_GREY)
-
-    draw.line([(40, 96), (W - 40, 96)], fill=BORDER_GOLD, width=1)
+    _shadow_text(draw, ((W - sw) / 2, s(72)), subtitle, sf, GOLD)
 
     stats = f"Item Level {item_level or '?'}   •   {achievement_points:,} Achievement Points"
     if guild_name:
-        stats += f"   •   {guild_name}"
+        stats += f"   •   <{guild_name}>"
     stf = F_STATS()
     stw = draw.textlength(stats, font=stf)
-    draw.text(((W - stw) / 2, 108), stats, font=stf, fill=(230, 200, 140))
+    draw.text(((W - stw) / 2, s(102)), stats, font=stf, fill=TEXT_GREY)
+
+    _paste_circular(canvas, avatar_bytes, (s(24) + PORTRAIT_D // 2 + s(10), s(24) + PORTRAIT_D // 2 + s(10)),
+                     PORTRAIT_D, class_color)
+    _draw_faction_badge(canvas, (W - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10)), faction)
 
     for i, slot in enumerate(LEFT_SLOTS):
         y = BODY_TOP + i * ROW_H
-        _draw_row(canvas, draw, 30, y, slot, by_slot.get(slot), icons_by_slot.get(slot))
+        _draw_row(canvas, draw, s(30), y, slot, by_slot.get(slot), icons_by_slot.get(slot))
 
     for i, slot in enumerate(RIGHT_SLOTS):
         y = BODY_TOP + i * ROW_H
-        _draw_row(canvas, draw, W - COL_W - 10, y, slot, by_slot.get(slot), icons_by_slot.get(slot))
+        _draw_row(canvas, draw, W - COL_W - s(30), y, slot, by_slot.get(slot), icons_by_slot.get(slot))
 
     if render_bytes:
         try:
@@ -186,9 +295,11 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
                     min(portrait.width, bbox[2] + pad), min(portrait.height, bbox[3] + pad),
                 )
                 portrait = portrait.crop(bbox)
-            box_w, box_h = 260, 470
+            box_w, box_h = PORTRAIT_BOX
             scale = min(box_w / portrait.width, box_h / portrait.height)
-            portrait = portrait.resize((int(portrait.width * scale), int(portrait.height * scale)))
+            portrait = portrait.resize(
+                (int(portrait.width * scale), int(portrait.height * scale)), Image.LANCZOS
+            )
             px = (W - portrait.width) // 2
             py = BODY_TOP + (len(LEFT_SLOTS) * ROW_H - portrait.height) // 2
             canvas.paste(portrait, (px, py), portrait)
@@ -199,3 +310,7 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     canvas.save(buf, format="PNG")
     buf.seek(0)
     return buf
+
+
+async def _noop():
+    return None

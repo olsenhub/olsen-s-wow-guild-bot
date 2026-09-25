@@ -37,6 +37,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
     item_level = profile.get("average_item_level")
     achievement_points = profile.get("achievement_points", 0)
     guild_name = (profile.get("guild") or {}).get("name")
+    faction = (profile.get("faction") or {}).get("type")
     last_login_ms = profile.get("last_login_timestamp")
     last_login = (
         datetime.fromtimestamp(last_login_ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
@@ -58,15 +59,14 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
     try:
         equipment = await bot.bnet_client.character_equipment(realm_slug, character_name)
         media = await bot.bnet_client.character_media(realm_slug, character_name)
-        render_url = next(
-            (a["value"] for a in media.get("assets", []) if a.get("key") in ("main-raw", "main")),
-            None,
-        )
+        assets = media.get("assets", [])
+        render_url = next((a["value"] for a in assets if a.get("key") in ("main-raw", "main")), None)
+        avatar_url = next((a["value"] for a in assets if a.get("key") == "avatar"), None)
         sheet_buf = await build_character_sheet(
             bot.bnet_client,
             name=name, level=level, race=race, char_class=char_class, spec=spec,
             guild_name=guild_name, item_level=item_level, achievement_points=achievement_points,
-            equipment=equipment, render_url=render_url,
+            faction=faction, equipment=equipment, render_url=render_url, avatar_url=avatar_url,
         )
         sheet_file = discord.File(sheet_buf, filename="character.png")
         embed.set_image(url="attachment://character.png")
