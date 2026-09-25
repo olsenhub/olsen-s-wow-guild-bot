@@ -8,3 +8,4 @@ data/*.sqlite3-wal
 data/*.sqlite3-shm
 .venv/
 *.egg-info/
+CLAUDE.md
