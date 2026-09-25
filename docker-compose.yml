@@ -1,0 +1,18 @@
+services:
+  poller:
+    build: .
+    command: ["python3", "-m", "blizzbot.run_poller"]
+    env_file: .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: ["python3", "-m", "blizzbot.run_bot"]
+    env_file: .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    depends_on:
+      - poller
