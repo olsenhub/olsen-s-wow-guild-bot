@@ -7,12 +7,7 @@ from discord.ext import commands
 from blizzbot import db
 from blizzbot.api import BattleNetError
 from blizzbot.emojis import SLOT_EMOJI, class_emoji
-
-GEAR_SLOT_ORDER = [
-    "HEAD", "NECK", "SHOULDER", "BACK", "CHEST", "SHIRT", "TABARD", "WRIST",
-    "HANDS", "WAIST", "LEGS", "FEET", "FINGER_1", "FINGER_2",
-    "TRINKET_1", "TRINKET_2", "MAIN_HAND", "OFF_HAND", "RANGED",
-]
+from blizzbot.gear_image import GEAR_SLOT_ORDER, build_gear_image
 
 QUALITY_DOT = {
     "POOR": "🔘",
@@ -39,7 +34,7 @@ def _format_gear_columns(equipment: dict) -> tuple[str, str]:
     return "\n".join(lines[:mid]) or "​", "\n".join(lines[mid:]) or "​"
 
 
-async def build_character_embed(bot: commands.Bot, character_name: str) -> discord.Embed:
+async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple[discord.Embed, discord.File | None]:
     conn = bot.db_conn
     cached = db.search_member_names(conn, character_name, limit=1)
     exact_cached = (
@@ -56,7 +51,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> disco
             title="Not found",
             description=f"Couldn't find **{character_name}** on `{realm_slug}` (or their profile is private).",
             color=discord.Color.red(),
-        )
+        ), None
 
     name = profile.get("name", character_name)
     level = profile.get("level")
@@ -86,12 +81,18 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> disco
         embed.add_field(name="Guild Rank", value=f"#{exact_cached['guild_rank']}", inline=True)
     embed.add_field(name="Last Login", value=last_login, inline=False)
 
+    gear_file = None
     try:
         equipment = await bot.bnet_client.character_equipment(realm_slug, character_name)
         left, right = _format_gear_columns(equipment)
         embed.add_field(name="Gear", value=left, inline=True)
         embed.add_field(name="​", value=right, inline=True)
         embed.set_footer(text="⚪ Common  🟢 Uncommon  🔵 Rare  🟣 Epic  🟠 Legendary")
+
+        image_buf = await build_gear_image(bot.bnet_client, equipment)
+        if image_buf:
+            gear_file = discord.File(image_buf, filename="gear.png")
+            embed.set_image(url="attachment://gear.png")
     except BattleNetError:
         pass
 
@@ -106,7 +107,7 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> disco
     except BattleNetError:
         pass
 
-    return embed
+    return embed, gear_file
 
 
 class CharacterLookup(commands.Cog):
@@ -117,8 +118,9 @@ class CharacterLookup(commands.Cog):
     @app_commands.describe(name="Character name")
     async def character(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(ephemeral=True)
-        embed = await build_character_embed(self.bot, name)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        embed, gear_file = await build_character_embed(self.bot, name)
+        kwargs = {"file": gear_file} if gear_file else {}
+        await interaction.followup.send(embed=embed, ephemeral=True, **kwargs)
 
     @character.autocomplete("name")
     async def character_autocomplete(self, interaction: discord.Interaction, current: str):

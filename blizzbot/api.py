@@ -78,3 +78,15 @@ class BattleNetClient:
             f"/profile/wow/character/{realm_slug}/{character_name.lower()}/character-media",
             self._config.namespace_profile,
         )
+
+    async def resolve_icon_url(self, media_href: str) -> str | None:
+        """Follows an item/spell's media href (already namespaced) to its actual
+        icon image URL on Blizzard's render CDN."""
+        token = await self._get_token()
+        resp = await self._client.get(media_href, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code != 200:
+            return None
+        for asset in resp.json().get("assets", []):
+            if asset.get("key") == "icon":
+                return asset.get("value")
+        return None

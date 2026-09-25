@@ -16,8 +16,9 @@ class CharacterLookupModal(discord.ui.Modal, title="Character Lookup"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        embed = await build_character_embed(self.bot, str(self.name.value))
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        embed, gear_file = await build_character_embed(self.bot, str(self.name.value))
+        kwargs = {"file": gear_file} if gear_file else {}
+        await interaction.followup.send(embed=embed, ephemeral=True, **kwargs)
 
 
 class PanelView(discord.ui.View):
