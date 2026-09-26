@@ -79,6 +79,35 @@ class BattleNetClient:
             self._config.namespace_profile,
         )
 
+    async def search_items(self, name_query: str, limit: int = 15) -> list[dict]:
+        """Partial/prefix name search (Blizzard's Search API supports a trailing
+        '*' wildcard). Returns raw item `data` dicts."""
+        result = await self._get(
+            "/data/wow/search/item",
+            self._config.namespace_static,
+            **{"name.en_US": f"{name_query}*", "orderby": "name.en_US", "_pageSize": limit},
+        )
+        return [r["data"] for r in result.get("results", [])]
+
+    async def item_by_id(self, item_id: int) -> dict:
+        return await self._get(f"/data/wow/item/{item_id}", self._config.namespace_static)
+
+    async def item_icon_url(self, item_id: int) -> str | None:
+        data = await self._get(f"/data/wow/media/item/{item_id}", self._config.namespace_static)
+        for asset in data.get("assets", []):
+            if asset.get("key") == "icon":
+                return asset.get("value")
+        return None
+
+    async def connected_realm_id(self, realm_slug: str) -> int:
+        realm = await self._get(f"/data/wow/realm/{realm_slug}", self._config.namespace_dynamic)
+        href = realm["connected_realm"]["href"]
+        return int(href.split("/connected-realm/")[1].split("?")[0])
+
+    async def connected_realm_auctions(self, connected_realm_id: int) -> list[dict]:
+        data = await self._get(f"/data/wow/connected-realm/{connected_realm_id}/auctions", self._config.namespace_dynamic)
+        return data.get("auctions", [])
+
     async def playable_class_icon_url(self, class_id: int) -> str | None:
         data = await self._get(f"/data/wow/media/playable-class/{class_id}", self._config.namespace_static)
         for asset in data.get("assets", []):

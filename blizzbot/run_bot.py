@@ -15,6 +15,7 @@ COGS = [
     "blizzbot.cogs.active_players",
     "blizzbot.cogs.character_lookup",
     "blizzbot.cogs.link",
+    "blizzbot.cogs.auction_house",
     "blizzbot.cogs.panel",
 ]
 
