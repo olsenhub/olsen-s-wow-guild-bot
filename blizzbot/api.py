@@ -81,11 +81,13 @@ class BattleNetClient:
 
     async def search_items(self, name_query: str, limit: int = 15) -> list[dict]:
         """Partial/prefix name search (Blizzard's Search API supports a trailing
-        '*' wildcard). Returns raw item `data` dicts."""
+        '*' wildcard). Returns raw item `data` dicts, ranked by Blizzard's own
+        relevance score -- do NOT add an `orderby`, it discards that ranking
+        and alphabetizes instead, burying the actual best match."""
         result = await self._get(
             "/data/wow/search/item",
             self._config.namespace_static,
-            **{"name.en_US": f"{name_query}*", "orderby": "name.en_US", "_pageSize": limit},
+            **{"name.en_US": f"{name_query}*", "_pageSize": limit},
         )
         return [r["data"] for r in result.get("results", [])]
 
