@@ -13,6 +13,10 @@ from discord.ext import commands
 from blizzbot.api import BattleNetError
 
 AUCTIONS_CACHE_TTL_SECONDS = 600
+FOOTER_NOTE = (
+    "Blizzard has no price history API, and this snapshot itself can lag ~1h behind "
+    "the real auction house — a just-posted item may not show up yet."
+)
 
 
 def format_money(copper: int) -> str:
@@ -76,6 +80,7 @@ class AuctionHouse(commands.Cog):
 
         if not listings:
             embed.description = "No auctions currently listed for this item."
+            embed.set_footer(text=FOOTER_NOTE)
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
@@ -99,7 +104,7 @@ class AuctionHouse(commands.Cog):
         embed.add_field(name="Total quantity", value=str(sum(p[2] for p in priced)), inline=True)
         if priced:
             embed.add_field(name="Lowest unit price", value=format_money(int(priced[0][0])), inline=True)
-        embed.set_footer(text="Live snapshot only — Blizzard has no price history API. Cached up to 10 min.")
+        embed.set_footer(text=FOOTER_NOTE)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
