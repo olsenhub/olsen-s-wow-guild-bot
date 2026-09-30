@@ -140,7 +140,12 @@ class AuctionHouse(commands.Cog):
             en_name = name.get("en_US") if isinstance(name, dict) else name
             if not en_name:
                 continue
-            choices.append(app_commands.Choice(name=en_name[:100], value=entry["id"]))
+            item_class = entry.get("item_class", {})
+            class_name = item_class.get("name")
+            if isinstance(class_name, dict):
+                class_name = class_name.get("en_US")
+            label = f"🚫 {en_name} (not on AH API)" if class_name in NEVER_LISTED_CLASSES else en_name
+            choices.append(app_commands.Choice(name=label[:100], value=entry["id"]))
         return choices[:20]
 
 
