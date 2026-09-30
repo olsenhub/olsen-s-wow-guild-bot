@@ -73,6 +73,12 @@ class BattleNetClient:
             self._config.namespace_profile,
         )
 
+    async def character_specializations(self, realm_slug: str, character_name: str) -> dict:
+        return await self._get(
+            f"/profile/wow/character/{realm_slug}/{character_name.lower()}/specializations",
+            self._config.namespace_profile,
+        )
+
     async def character_media(self, realm_slug: str, character_name: str) -> dict:
         return await self._get(
             f"/profile/wow/character/{realm_slug}/{character_name.lower()}/character-media",
@@ -112,6 +118,13 @@ class BattleNetClient:
 
     async def playable_class_icon_url(self, class_id: int) -> str | None:
         data = await self._get(f"/data/wow/media/playable-class/{class_id}", self._config.namespace_static)
+        for asset in data.get("assets", []):
+            if asset.get("key") == "icon":
+                return asset.get("value")
+        return None
+
+    async def playable_specialization_icon_url(self, spec_id: int) -> str | None:
+        data = await self._get(f"/data/wow/media/playable-specialization/{spec_id}", self._config.namespace_static)
         for asset in data.get("assets", []):
             if asset.get("key") == "icon":
                 return asset.get("value")

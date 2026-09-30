@@ -9,7 +9,9 @@ import io
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps, ImageFilter
+
+from blizzbot.api import BattleNetError
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -58,7 +60,8 @@ SLOT_LABEL = {
     "TRINKET_2": "Trinket", "MAIN_HAND": "Main Hand", "OFF_HAND": "Off Hand",
 }
 
-W, H = s(940), s(700)
+W, H = s(940), s(700)   # W is the gear/portrait area; the talent panel widens the canvas beyond it
+PANEL_W = s(350)
 ROW_H = s(58)
 ICON = s(44)
 COL_W = s(310)
@@ -79,6 +82,7 @@ ACCENT = (180, 180, 180)
 TEXT_GREY = (176, 168, 156)
 TEXT_ENCHANT = (60, 210, 80)
 SHADOW = (0, 0, 0)
+TEXT_TALENT = (222, 214, 200)
 
 
 def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
@@ -93,6 +97,7 @@ def F_SUBTITLE(): return _font("DejaVuSans-Bold.ttf", s(18))
 def F_STATS(): return _font("DejaVuSans.ttf", s(16))
 def F_ITEM(): return _font("DejaVuSans-Bold.ttf", s(14))
 def F_SMALL(): return _font("DejaVuSans.ttf", s(12))
+def F_TALENT(): return _font("DejaVuSans.ttf", s(14))
 
 
 async def _fetch(url: str) -> bytes | None:
@@ -156,18 +161,19 @@ def _circle_mask(diameter: int) -> Image.Image:
 
 
 def _draw_frame(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    bg = _stone_texture(W, H, (10, 10, 10), (26, 26, 26))
+    w = canvas.width
+    bg = _stone_texture(w, H, (10, 10, 10), (26, 26, 26))
     canvas.paste(bg, (0, 0))
     margin = s(8)
-    _bevel_box(draw, margin, margin, W - margin, H - margin, depth=s(4) or 3, raised=True, fill=None)
+    _bevel_box(draw, margin, margin, w - margin, H - margin, depth=s(4) or 3, raised=True, fill=None)
     inner = s(16)
-    panel_tex = _stone_texture(W - inner * 2, H - inner * 2, (16, 16, 16), (36, 36, 36))
+    panel_tex = _stone_texture(w - inner * 2, H - inner * 2, (16, 16, 16), (36, 36, 36))
     canvas.paste(panel_tex, (inner, inner))
-    _bevel_box(draw, inner, inner, W - inner, H - inner, depth=s(2) or 2, raised=False)
+    _bevel_box(draw, inner, inner, w - inner, H - inner, depth=s(2) or 2, raised=False)
 
 
 def _header_bar(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
-    x0, y0, x1, y1 = s(24), s(24), W - s(24), s(150)
+    x0, y0, x1, y1 = s(24), s(24), canvas.width - s(24), s(150)
     bar = _stone_texture(x1 - x0, y1 - y0, (14, 14, 14), (42, 42, 42))
     canvas.paste(bar, (x0, y0))
     _bevel_box(draw, x0, y0, x1, y1, depth=s(3) or 2, raised=False)
@@ -241,20 +247,201 @@ def _draw_faction_badge(canvas: Image.Image, center_xy, faction_type: str | None
     canvas.paste(crest, (cx - crest.width // 2, cy - crest.height // 2), crest)
 
 
+def _spec_blocks(specializations: dict | None) -> list[dict]:
+    """Flattens the /specializations response into one dict per spec (active first):
+    name, id, is_active, talents (name + spell id), glyph names. Specs with no talents (e.g. a
+    character below the talent level) are dropped."""
+    if not specializations:
+        return []
+    active_id = (specializations.get("active_specialization") or {}).get("id")
+    groups = specializations.get("specialization_groups") or []
+    blocks = []
+    for i, spec in enumerate(specializations.get("specializations") or []):
+        talents = [
+            {"name": t["talent"]["name"], "spell_id": (t.get("spell_tooltip") or {}).get("spell", {}).get("id")}
+            for t in spec.get("talents") or [] if t.get("talent")
+        ]
+        if not talents:
+            continue
+        # glyph groups line up index-for-index with specs (verified on the live API)
+        glyphs = []
+        if len(groups) == len(specializations["specializations"]):
+            glyphs = [g["name"].removeprefix("Glyph of ") for g in groups[i].get("glyphs") or []]
+        info = spec.get("specialization") or {}
+        blocks.append({
+            "id": info.get("id"), "name": info.get("name") or spec.get("specialization_name") or "Unknown",
+            "active": info.get("id") == active_id, "talents": talents, "glyphs": glyphs,
+        })
+    return sorted(blocks, key=lambda b: not b["active"])
+
+
+async def _fetch_spec_icon(bnet_client, spec_id: int | None) -> bytes | None:
+    if not spec_id:
+        return None
+    try:
+        url = await bnet_client.playable_specialization_icon_url(spec_id)
+    except BattleNetError:
+        return None
+    return await _fetch(url) if url else None
+
+
+_TALENT_ICON_CACHE: dict[int, bytes] = {}
+_WOWHEAD_HEADERS = {"User-Agent": "Mozilla/5.0 (blizz_bot)"}
+
+
+async def _fetch_talent_icon(spell_id: int | None) -> bytes | None:
+    """Battle.net has no spell-icon lookup for classic (media/spell 404s, and retail's
+    namespace only knows ~half the MoP spell ids), so the icon name comes from Wowhead's
+    MoP Classic tooltip endpoint and the image from their CDN. Icons never change, so
+    successes are cached for the life of the process; failures are not (may be transient)
+    and just leave a blank slot."""
+    if not spell_id:
+        return None
+    if spell_id in _TALENT_ICON_CACHE:
+        return _TALENT_ICON_CACHE[spell_id]
+    try:
+        async with httpx.AsyncClient(timeout=6.0, headers=_WOWHEAD_HEADERS) as client:
+            resp = await client.get(f"https://nether.wowhead.com/mop-classic/tooltip/spell/{spell_id}")
+            icon_name = resp.json().get("icon") if resp.status_code == 200 else None
+            if not icon_name:
+                return None
+            img = await client.get(f"https://wow.zamimg.com/images/wow/icons/large/{icon_name}.jpg")
+            if img.status_code != 200:
+                return None
+    except (httpx.HTTPError, ValueError):
+        return None
+    _TALENT_ICON_CACHE[spell_id] = img.content
+    return img.content
+
+
+def _wrap_items(draw, items: list[str], font, max_width: int, sep: str = "  •  ") -> list[str]:
+    lines, current = [], ""
+    for item in items:
+        candidate = f"{current}{sep}{item}" if current else item
+        if current and draw.textlength(candidate, font=font) > max_width:
+            lines.append(current)
+            current = item
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_spec_panel(canvas: Image.Image, draw: ImageDraw.ImageDraw, blocks: list[dict],
+                     spec_icons: list[bytes | None], talent_icons: dict[int, bytes | None], class_color) -> None:
+    x0, y0 = W + s(2), s(160)
+    x1, y1 = canvas.width - s(30), BODY_TOP + 9 * ROW_H + s(4) - s(6)
+    canvas.paste(_stone_texture(x1 - x0, y1 - y0, (14, 14, 14), (34, 34, 34)), (x0, y0))
+    _bevel_box(draw, x0, y0, x1, y1, depth=s(2) or 2, raised=False)
+
+    pad = s(14)
+    inner_w = x1 - x0 - pad * 2
+    title_f = F_ITEM()
+    title = "TALENTS"
+    _shadow_text(draw, (x0 + (x1 - x0 - draw.textlength(title, font=title_f)) / 2, y0 + s(8)), title, title_f, TEXT_GREY)
+    top = y0 + s(32)
+
+    name_f, tag_f, talent_f, small_f = F_SUBTITLE(), F_SMALL(), F_TALENT(), F_SMALL()
+    icon_d = s(30)
+
+    glyph_lines = []
+    for block in blocks:
+        lines = _wrap_items(draw, block["glyphs"], small_f, inner_w)
+        if len(lines) > 3:
+            lines = lines[:2] + [_truncate(draw, "  •  ".join(lines[2:]), small_f, inner_w)]
+        glyph_lines.append(lines)
+
+    def block_height(i: int, row_h: int) -> int:
+        h = icon_d + s(10) + len(blocks[i]["talents"]) * row_h + s(14)
+        if glyph_lines[i]:
+            h += s(6) + s(16) + len(glyph_lines[i]) * s(15)
+        return h
+
+    # The panel is a fixed height, so give the talent rows as much room as two specs allow
+    # (a single-spec character gets roomier rows than a dual-spec one).
+    available = y1 - top - s(8) - s(6) * (len(blocks) - 1)
+    row_h = s(19)
+    for candidate in (s(30), s(26), s(23), s(21)):
+        if sum(block_height(i, candidate) for i in range(len(blocks))) <= available:
+            row_h = candidate
+            break
+    talent_d = row_h - s(4)
+
+    y = top
+    for n, block in enumerate(blocks):
+        if n:
+            draw.line([(x0 + pad, y - s(6)), (x1 - pad, y - s(6))], fill=BEVEL_DARK, width=max(1, s(1)))
+            draw.line([(x0 + pad, y - s(6) + max(1, s(1))), (x1 - pad, y - s(6) + max(1, s(1)))], fill=BEVEL_LIGHT)
+            y += s(6)
+        active = block["active"]
+        rim = class_color if active else EMPTY_SLOT_COLOR
+        ix = x0 + pad
+        draw.rectangle([ix - s(2), y - s(2), ix + icon_d + s(2), y + icon_d + s(2)], fill=rim)
+        _paste_icon(canvas, draw, spec_icons[n], ix, y, icon_d, dim=False)
+
+        tx = ix + icon_d + s(12)
+        _shadow_text(draw, (tx, y - s(4)), _truncate(draw, block["name"], name_f, x1 - pad - tx), name_f,
+                     class_color if active else TEXT_GREY)
+        draw.text((tx, y + s(17)), "Active spec" if active else "Off-spec", font=tag_f,
+                  fill=TEXT_ENCHANT if active else TEXT_GREY)
+        y += icon_d + s(10)
+
+        for talent in block["talents"]:
+            draw.rectangle([ix - s(1), y - s(1) + (row_h - talent_d) // 2, ix + talent_d + s(1),
+                            y + talent_d + s(1) + (row_h - talent_d) // 2], fill=rim)
+            _paste_icon(canvas, draw, talent_icons.get(talent["spell_id"]), ix, y + (row_h - talent_d) // 2,
+                        talent_d, dim=not active)
+            draw.text((ix + talent_d + s(10), y + row_h // 2 - s(2)),
+                      _truncate(draw, talent["name"], talent_f, inner_w - talent_d - s(10)),
+                      font=talent_f, fill=TEXT_TALENT if active else TEXT_GREY, anchor="lm")
+            y += row_h
+
+        if glyph_lines[n]:
+            y += s(6)
+            draw.text((ix, y), "Glyphs", font=small_f, fill=ACCENT)
+            y += s(16)
+            for line in glyph_lines[n]:
+                draw.text((ix, y), line, font=small_f, fill=TEXT_GREY)
+                y += s(15)
+        y += s(14)
+
+
+def _paste_icon(canvas: Image.Image, draw: ImageDraw.ImageDraw, icon_bytes: bytes | None,
+                x: int, y: int, size: int, dim: bool) -> None:
+    if icon_bytes:
+        try:
+            icon = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((size, size), Image.LANCZOS)
+            if dim:
+                icon = ImageEnhance.Brightness(icon).enhance(0.55)
+            canvas.paste(icon, (x, y), icon)
+            return
+        except Exception:
+            pass
+    draw.rectangle([x, y, x + size, y + size], fill=(12, 10, 8))
+
+
 async def build_character_sheet(bnet_client, *, name: str, level: int, race: str, char_class: str,
                                  spec: str | None, guild_name: str | None, item_level, achievement_points,
                                  faction: str | None, equipment: dict,
-                                 render_url: str | None, class_icon_url: str | None) -> io.BytesIO:
+                                 render_url: str | None, class_icon_url: str | None,
+                                 specializations: dict | None = None) -> io.BytesIO:
+    spec_blocks = _spec_blocks(specializations)
     by_slot = {i["slot"]["type"]: i for i in equipment.get("equipped_items", [])}
     all_slots = LEFT_SLOTS + RIGHT_SLOTS
-    icon_bytes_list, render_bytes, class_icon_bytes = await asyncio.gather(
+    talent_ids = sorted({tal["spell_id"] for b in spec_blocks for tal in b["talents"] if tal["spell_id"]})
+    icon_bytes_list, render_bytes, class_icon_bytes, spec_icons, talent_icon_list = await asyncio.gather(
         asyncio.gather(*(_fetch_item_icon(bnet_client, by_slot.get(slot)) for slot in all_slots)),
         _fetch(render_url) if render_url else _noop(),
         _fetch(class_icon_url) if class_icon_url else _noop(),
+        asyncio.gather(*(_fetch_spec_icon(bnet_client, b["id"]) for b in spec_blocks)),
+        asyncio.gather(*(_fetch_talent_icon(sid) for sid in talent_ids)),
     )
+    talent_icons = dict(zip(talent_ids, talent_icon_list))
     icons_by_slot = dict(zip(all_slots, icon_bytes_list))
 
-    canvas = Image.new("RGB", (W, H), STONE_DARK)
+    total_w = W + PANEL_W if spec_blocks else W
+    canvas = Image.new("RGB", (total_w, H), STONE_DARK)
     draw = ImageDraw.Draw(canvas)
     _draw_frame(canvas, draw)
     _header_bar(canvas, draw)
@@ -262,19 +449,19 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     class_color = CLASS_COLOR.get(char_class, (235, 230, 220))
     tf = F_TITLE()
     tw = draw.textlength(name, font=tf)
-    _shadow_text(draw, ((W - tw) / 2, s(32)), name, tf, class_color)
+    _shadow_text(draw, ((total_w - tw) / 2, s(32)), name, tf, class_color)
 
     subtitle = f"Level {level} {race} {char_class}" + (f" — {spec}" if spec else "")
     sf = F_SUBTITLE()
     sw = draw.textlength(subtitle, font=sf)
-    _shadow_text(draw, ((W - sw) / 2, s(72)), subtitle, sf, ACCENT)
+    _shadow_text(draw, ((total_w - sw) / 2, s(72)), subtitle, sf, ACCENT)
 
     stats = f"Item Level {item_level or '?'}   •   {achievement_points:,} Achievement Points"
     if guild_name:
         stats += f"   •   <{guild_name}>"
     stf = F_STATS()
     stw = draw.textlength(stats, font=stf)
-    draw.text(((W - stw) / 2, s(102)), stats, font=stf, fill=TEXT_GREY)
+    draw.text(((total_w - stw) / 2, s(102)), stats, font=stf, fill=TEXT_GREY)
 
     _paste_circular(
         canvas, class_icon_bytes,
@@ -283,7 +470,7 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
     )
     _draw_faction_badge(
         canvas,
-        (W - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10) + FACTION_Y_OFFSET),
+        (total_w - s(24) - FACTION_D // 2 - s(10), s(24) + FACTION_D // 2 + s(10) + FACTION_Y_OFFSET),
         faction,
     )
 
@@ -316,6 +503,9 @@ async def build_character_sheet(bnet_client, *, name: str, level: int, race: str
             canvas.paste(portrait, (px, py), portrait)
         except Exception:
             pass
+
+    if spec_blocks:
+        _draw_spec_panel(canvas, draw, spec_blocks, list(spec_icons), talent_icons, class_color)
 
     buf = io.BytesIO()
     canvas.save(buf, format="PNG")

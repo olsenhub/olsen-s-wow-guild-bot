@@ -12,6 +12,8 @@ class GuildMember:
     average_item_level: int | None
     achievement_points: int | None
     updated_at: str
+    active_spec: str | None = None
+    active_spec_id: int | None = None
 
 
 @dataclass

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS guild_members (
     average_item_level INTEGER,
     achievement_points INTEGER,
     updated_at TEXT NOT NULL,
+    active_spec TEXT,
+    active_spec_id INTEGER,
     PRIMARY KEY (character_name, realm_slug)
 );
 
@@ -43,7 +45,20 @@ def connect(database_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    # CREATE TABLE IF NOT EXISTS won't add columns to a DB created before they existed.
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(guild_members)")}
+    for column, decl in (("active_spec", "TEXT"), ("active_spec_id", "INTEGER")):
+        if column not in columns:
+            try:
+                conn.execute(f"ALTER TABLE guild_members ADD COLUMN {column} {decl}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # the bot and poller both call connect(); the other one got there first
 
 
 def _now() -> str:
@@ -53,13 +68,15 @@ def _now() -> str:
 def upsert_guild_member(conn: sqlite3.Connection, *, character_name: str, realm_slug: str,
                          character_class: str, level: int, guild_rank: int,
                          last_login_timestamp: int | None, average_item_level: int | None,
-                         achievement_points: int | None) -> None:
+                         achievement_points: int | None, active_spec: str | None = None,
+                         active_spec_id: int | None = None) -> None:
     conn.execute(
         """
         INSERT INTO guild_members (
             character_name, realm_slug, character_class, level, guild_rank,
-            last_login_timestamp, average_item_level, achievement_points, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            last_login_timestamp, average_item_level, achievement_points, updated_at, active_spec,
+            active_spec_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (character_name, realm_slug) DO UPDATE SET
             character_class = excluded.character_class,
             level = excluded.level,
@@ -67,10 +84,13 @@ def upsert_guild_member(conn: sqlite3.Connection, *, character_name: str, realm_
             last_login_timestamp = excluded.last_login_timestamp,
             average_item_level = excluded.average_item_level,
             achievement_points = excluded.achievement_points,
-            updated_at = excluded.updated_at
+            updated_at = excluded.updated_at,
+            active_spec = excluded.active_spec,
+            active_spec_id = excluded.active_spec_id
         """,
         (character_name, realm_slug, character_class, level, guild_rank,
-         last_login_timestamp, average_item_level, achievement_points, _now()),
+         last_login_timestamp, average_item_level, achievement_points, _now(), active_spec,
+         active_spec_id),
     )
     conn.commit()
 
@@ -111,20 +131,46 @@ def insert_snapshot(conn: sqlite3.Connection, *, character_name: str, realm_slug
 
 
 def leaderboard(conn: sqlite3.Connection, metric: str, character_class: str | None = None,
-                 limit: int = 10) -> list[sqlite3.Row]:
+                 active_spec: str | None = None, limit: int = 10) -> list[sqlite3.Row]:
     column = {
         "level": "level",
         "achievement_points": "achievement_points",
         "item_level": "average_item_level",
     }[metric]
-    query = f"SELECT character_name, realm_slug, character_class, {column} AS value FROM guild_members"
+    query = (
+        f"SELECT character_name, realm_slug, character_class, active_spec, {column} AS value "
+        "FROM guild_members"
+    )
+    filters: list[str] = []
     params: list = []
     if character_class:
-        query += " WHERE character_class = ?"
+        filters.append("character_class = ?")
         params.append(character_class)
+    if active_spec:
+        filters.append("active_spec = ?")
+        params.append(active_spec)
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
     query += f" ORDER BY {column} DESC LIMIT ?"
     params.append(limit)
     return conn.execute(query, params).fetchall()
+
+
+def specs_for_class(conn: sqlite3.Connection, character_class: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT active_spec FROM guild_members "
+        "WHERE character_class = ? AND active_spec IS NOT NULL ORDER BY active_spec",
+        (character_class,),
+    ).fetchall()
+    return [row["active_spec"] for row in rows]
+
+
+def known_specs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every (class, spec, spec id) seen on the roster, for uploading spec emojis."""
+    return conn.execute(
+        "SELECT DISTINCT character_class, active_spec, active_spec_id FROM guild_members "
+        "WHERE character_class IS NOT NULL AND active_spec IS NOT NULL AND active_spec_id IS NOT NULL"
+    ).fetchall()
 
 
 def recently_active(conn: sqlite3.Connection, limit: int = 15) -> list[sqlite3.Row]:

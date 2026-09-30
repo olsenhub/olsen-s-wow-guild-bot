@@ -1,11 +1,12 @@
 import logging
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from blizzbot import db
 from blizzbot.api import BattleNetClient
 from blizzbot.config import load_config
+from blizzbot.emojis import sync_spec_emojis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bot")
@@ -45,6 +46,8 @@ class BlizzBot(commands.Bot):
             self.application_emojis = []
             log.exception("Could not fetch application emojis")
 
+        self.spec_emoji_loop.start()
+
         if self.config.discord_guild_id:
             guild_obj = discord.Object(id=self.config.discord_guild_id)
             self.tree.copy_global_to(guild=guild_obj)
@@ -53,6 +56,17 @@ class BlizzBot(commands.Bot):
         else:
             await self.tree.sync()
             log.info("Synced commands globally (can take up to an hour to propagate)")
+
+    @tasks.loop(minutes=10)
+    async def spec_emoji_loop(self):
+        try:
+            await sync_spec_emojis(self)
+        except Exception:
+            log.exception("Spec emoji sync failed")
+
+    @spec_emoji_loop.before_loop
+    async def _before_spec_emoji_loop(self):
+        await self.wait_until_ready()
 
     async def close(self):
         await self.bnet_client.aclose()

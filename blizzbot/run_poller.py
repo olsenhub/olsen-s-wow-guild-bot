@@ -52,6 +52,8 @@ async def sync_once(client: BattleNetClient, conn, config) -> None:
         achievement_points = profile.get("achievement_points", 0)
         last_login = profile.get("last_login_timestamp")
         char_class = profile.get("character_class", {}).get("name")
+        active_spec = (profile.get("active_spec") or {}).get("name")
+        active_spec_id = (profile.get("active_spec") or {}).get("id")
 
         previous = db.get_member(conn, name, realm_slug)
 
@@ -65,6 +67,8 @@ async def sync_once(client: BattleNetClient, conn, config) -> None:
             last_login_timestamp=last_login,
             average_item_level=item_level,
             achievement_points=achievement_points,
+            active_spec=active_spec,
+            active_spec_id=active_spec_id,
         )
         db.insert_snapshot(
             conn,

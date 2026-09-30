@@ -64,11 +64,16 @@ async def build_character_embed(bot: commands.Bot, character_name: str) -> tuple
         class_icon_url = (
             await bot.bnet_client.playable_class_icon_url(char_class_id) if char_class_id else None
         )
+        try:
+            specializations = await bot.bnet_client.character_specializations(realm_slug, character_name)
+        except BattleNetError:
+            specializations = None  # sheet still renders, just without the talent panel
         sheet_buf = await build_character_sheet(
             bot.bnet_client,
             name=name, level=level, race=race, char_class=char_class, spec=spec,
             guild_name=guild_name, item_level=item_level, achievement_points=achievement_points,
             faction=faction, equipment=equipment, render_url=render_url, class_icon_url=class_icon_url,
+            specializations=specializations,
         )
         sheet_file = discord.File(sheet_buf, filename="character.png")
         embed.set_image(url="attachment://character.png")
