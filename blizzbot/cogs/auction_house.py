@@ -17,6 +17,16 @@ FOOTER_NOTE = (
     "Blizzard has no price history API, and this snapshot itself can lag ~1h behind "
     "the real auction house — a just-posted item may not show up yet."
 )
+# Confirmed by sampling (40 random listings, 0 matches) and direct spot checks
+# (Sea Mist Rice Noodles, Flask of Spring Blossoms, Ghost Iron Ore all 0):
+# Classic's connected-realm auctions endpoint only ever returns
+# Armor/Weapon/Miscellaneous-class items. The separate "commodities" feed
+# (where Blizzard normally puts stackable goods) comes back empty for Classic
+# -- not populated, not just slow. So Consumables and Trade Goods (flasks,
+# food, potions, herbs, ore, cloth, etc.) can never be found here, no matter
+# how long you wait. Not a bug -- Blizzard just doesn't expose that data for
+# Classic through any endpoint we've found.
+NEVER_LISTED_CLASSES = {"Consumable", "Trade Goods"}
 
 
 def format_money(copper: int) -> str:
@@ -66,6 +76,7 @@ class AuctionHouse(commands.Cog):
             return
 
         name = item_data.get("name", "Unknown item")
+        item_class = item_data.get("item_class", {}).get("name", "")
         embed = discord.Embed(title=f"💰 {name}", color=discord.Color.gold())
 
         try:
@@ -79,8 +90,15 @@ class AuctionHouse(commands.Cog):
         listings = [a for a in auctions if a.get("item", {}).get("id") == item]
 
         if not listings:
-            embed.description = "No auctions currently listed for this item."
-            embed.set_footer(text=FOOTER_NOTE)
+            if item_class in NEVER_LISTED_CLASSES:
+                embed.description = (
+                    f"Blizzard's Classic API doesn't expose Auction House data for "
+                    f"**{item_class}**-type items (confirmed — this isn't a delay, "
+                    f"it just isn't there). `/ah` only works for gear/weapons/misc items."
+                )
+            else:
+                embed.description = "No auctions currently listed for this item."
+                embed.set_footer(text=FOOTER_NOTE)
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
