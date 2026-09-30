@@ -17,16 +17,17 @@ FOOTER_NOTE = (
     "Blizzard has no price history API, and this snapshot itself can lag ~1h behind "
     "the real auction house — a just-posted item may not show up yet."
 )
-# Confirmed by sampling (40 random listings, 0 matches) and direct spot checks
-# (Sea Mist Rice Noodles, Flask of Spring Blossoms, Ghost Iron Ore all 0):
-# Classic's connected-realm auctions endpoint only ever returns
-# Armor/Weapon/Miscellaneous-class items. The separate "commodities" feed
-# (where Blizzard normally puts stackable goods) comes back empty for Classic
-# -- not populated, not just slow. So Consumables and Trade Goods (flasks,
-# food, potions, herbs, ore, cloth, etc.) can never be found here, no matter
-# how long you wait. Not a bug -- Blizzard just doesn't expose that data for
-# Classic through any endpoint we've found.
-NEVER_LISTED_CLASSES = {"Consumable", "Trade Goods"}
+# Two different reasons an item can never show listings here, both confirmed:
+# 1. Consumable/Trade Goods -- Classic's connected-realm auctions endpoint only
+#    ever returns Armor/Weapon/Miscellaneous-class items (confirmed via 40
+#    random listings sampled, 0 Consumables/Trade Goods; spot-checked actively
+#    -traded items like Ghost Iron Ore too). The separate "commodities" feed
+#    (where Blizzard normally puts stackable goods) comes back empty for
+#    Classic -- not populated, not just slow. API gap, not a game rule.
+# 2. Quest -- these items are Soulbound/non-tradeable by WoW's own game
+#    design, so they were never sellable on the AH in the first place. Not an
+#    API limitation, just a true fact about the item.
+NEVER_LISTED_CLASSES = {"Consumable", "Trade Goods", "Quest"}
 
 
 def format_money(copper: int) -> str:
@@ -90,7 +91,12 @@ class AuctionHouse(commands.Cog):
         listings = [a for a in auctions if a.get("item", {}).get("id") == item]
 
         if not listings:
-            if item_class in NEVER_LISTED_CLASSES:
+            if item_class == "Quest":
+                embed.description = (
+                    "This is a Quest item — it's Soulbound and was never sellable on the "
+                    "Auction House to begin with. Not an API issue, just how the item works."
+                )
+            elif item_class in NEVER_LISTED_CLASSES:
                 embed.description = (
                     f"Blizzard's Classic API doesn't expose Auction House data for "
                     f"**{item_class}**-type items (confirmed — this isn't a delay, "
@@ -144,7 +150,7 @@ class AuctionHouse(commands.Cog):
             class_name = item_class.get("name")
             if isinstance(class_name, dict):
                 class_name = class_name.get("en_US")
-            label = f"🚫 {en_name} (not on AH API)" if class_name in NEVER_LISTED_CLASSES else en_name
+            label = f"🚫 {en_name} (can't be found here)" if class_name in NEVER_LISTED_CLASSES else en_name
             choices.append(app_commands.Choice(name=label[:100], value=entry["id"]))
         return choices[:20]
 
